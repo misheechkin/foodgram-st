@@ -12,6 +12,7 @@ gunicorn==23.0.0
 idna==3.10
 oauthlib==3.2.2
 packaging==25.0
+pillow==11.2.1
 pycparser==2.22
 PyJWT==2.9.0
 python3-openid==3.2.0
@@ -21,4 +22,3 @@ social-auth-app-django==5.4.3
 social-auth-core==4.6.1
 sqlparse==0.5.3
 urllib3==2.4.0
-pillow==11.2.1

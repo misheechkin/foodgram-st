@@ -1,9 +1,6 @@
 from base64 import b64decode
 from django.core.files.base import ContentFile
-from django.shortcuts import get_object_or_404
-from rest_framework import serializers, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
+from rest_framework import serializers
 
 from .models import Recipe, Ingredient, IngredientRecipe
 
@@ -95,11 +92,3 @@ class RecipeSerializer(serializers.ModelSerializer):
         if ing_data is not None:
             self._create_or_update_ingredients(instance, ing_data)
         return instance
-
-    @action(detail=True, methods=['get'], url_path='get-link')
-    def get_short_link(self, request, pk=None):
-        recipe = get_object_or_404(Recipe, pk=pk)
-        full_url = request.build_absolute_uri(recipe.get_absolute_url())
-        from django_short_url.views import get_surl
-        short = get_surl(full_url)
-        return Response({'short_link': short}, status=status.HTTP_200_OK)
