@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'recipes.apps.RecipesConfig',
     'djoser',
     'users.apps.UsersConfig',
+    'django_filters',
 ]
 
 AUTH_USER_MODEL = 'users.Profile'

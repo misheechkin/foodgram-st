@@ -41,6 +41,15 @@ class Recipe(models.Model):
         related_name='recipes',
         on_delete=models.CASCADE
     )
+
+    is_favorited = models.BooleanField(
+        verbose_name=('В Избранном'),
+        default=False
+    )
+    is_in_shopping_cart = models.BooleanField(
+        verbose_name=('В Корзине'),
+        default=False
+    )
     ingredients = models.ManyToManyField(
         Ingredient,
         through='IngredientRecipe',
