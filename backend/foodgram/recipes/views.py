@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import PageNumberPagination
 from .models import Recipe, Ingredient
@@ -10,6 +10,8 @@ class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = IngredientSerializer
     pagination_class = None
     permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    filter_backends = (DjangoFilterBackend, filters.SearchFilter)
+    search_fields = ('name', )
 
 
 class RecipeViewSet(viewsets.ModelViewSet):
@@ -18,7 +20,9 @@ class RecipeViewSet(viewsets.ModelViewSet):
     serializer_class = RecipeSerializer
     permission_classes = (AuthorOrReadOnly,)
     filter_backends = (DjangoFilterBackend,)
-    filterset_fields = ('author', 'is_favorited', 'is_in_shopping_cart')
+    search_fields = ('name',)
+    filterset_fields = ('author', 'name', 'is_favorited', 'is_in_shopping_cart')
+    
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
