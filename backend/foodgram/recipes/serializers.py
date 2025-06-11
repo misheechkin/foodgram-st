@@ -1,8 +1,11 @@
 from base64 import b64decode
+from io import StringIO
+from django.contrib.auth import get_user
 from django.core.files.base import ContentFile
-from rest_framework import serializers
-
-from .models import Recipe, Ingredient, IngredientRecipe
+from rest_framework import serializers,status
+from django.http import FileResponse
+from rest_framework.response import Response
+from .models import Recipe, Ingredient, IngredientRecipe, ShoppingCart
 
 
 class Base64ImageField(serializers.ImageField):
@@ -92,3 +95,53 @@ class RecipeSerializer(serializers.ModelSerializer):
         if ing_data is not None:
             self._create_or_update_ingredients(instance, ing_data)
         return instance
+    
+
+    @action(detail=True, methods=['post', 'delete'], url_path='shopping_cart')
+    def post_delete_shopping_cart(self, request, pk=None):
+        recipe = get_object_or_404(Recipe, pk=pk)
+        user = get_user(request=request)
+
+        if request.method == 'POST':
+            note, created = ShoppingCart.objects.get_or_create(
+                user=user, recipe=recipe)
+            if not created:
+                return Response(detail='Рецепт уже в списке покупок!',
+                                status=status.HTTP_400_BAD_REQUEST)
+            return Response(status=status.HTTP_201_CREATED)
+        elif request.method == 'DELETE':
+            count, var = ShoppingCart.objects.filter(
+                user=user, recipe=recipe).delete()
+            if count == 0:
+                return Response(status=status.HTTP_400_BAD_REQUEST)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        else:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='download-shopping-cart')
+    def download_cart(self, request):
+        user = get_user(request=request)
+
+        ingredients = {}
+
+        pk_in_cart = ShoppingCart.objects.filter(user=user)
+        for recipe_pk in pk_in_cart:
+            in_recipe = Recipe.objects.get(pk=recipe_pk).ingredients
+            for ingr in in_recipe:
+                product = Ingredient.objects.get(pk=ingr.pk)
+                if product in ingredients.keys:
+                    ingredients[product] += ingr.amount
+                else:
+                    ingredients[product] = ingr.amount
+
+        if len(ingredients) == 0:
+            return Response(detail='Список покупок пуст!',
+                            status=status.HTTP_200_OK)
+
+        file = StringIO()
+        for ingredient, amount in ingredients:
+            s = f'{ingredient.name} - {amount} {ingredient.measurement_unit}\n'
+            file.write(s)
+
+        return FileResponse(file, as_attachment=True,
+                            filename='shoppingcart.txt')

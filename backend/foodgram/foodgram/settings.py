@@ -51,6 +51,14 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = 'users.Profile'
 
 
+
+DJOSER = {
+    'LOGIN_FIELD': 'users.models.Profile.email',
+    'SERIALIZERS': {
+        'user': 'users.serializers.ProfileSerializer',
+    },
+}
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

@@ -3,6 +3,10 @@ from django.contrib.auth.models import AbstractUser
 
 
 class Profile(AbstractUser):
+    email = models.EmailField(
+        unique=True,
+        max_length=255
+    )
 
     avatar = models.ImageField(
         verbose_name='Аватар',

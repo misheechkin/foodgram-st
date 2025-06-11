@@ -94,3 +94,31 @@ class IngredientRecipe(models.Model):
 
     def __str__(self):
         return f'{self.ingredient} - {self.recipe}'
+
+class CartItem(models.Model):
+
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='cart_items',
+        verbose_name='Владелец корзины'
+    )
+    recipe = models.ForeignKey(
+        Recipe,
+        on_delete=models.CASCADE,
+        related_name='recipes',
+        verbose_name='Рецепт'
+    )
+
+    class Meta:
+        verbose_name = 'элемент корзины'
+        verbose_name_plural = 'элементы корзин'
+        constraints = [
+            models.UniqueConstraint(
+                fields=('owner', 'recipe'),
+                name='unique_cartitem'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.recipe.title} — корзина {self.owner.username}"

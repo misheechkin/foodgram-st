@@ -55,3 +55,5 @@ class ProfileSerializer(serializers.ModelSerializer):
         if instance.avatar:
             instance.avatar.delete(save=True)
         return instance
+
+    
