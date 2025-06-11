@@ -8,6 +8,31 @@ class Profile(AbstractUser):
         max_length=255
     )
 
+
+    last_name = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    username = models.CharField(
+        max_length=255,
+        unique=True,
+    )
+
+    first_name = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = [
+        'first_name',
+        'username',
+        'password'
+        'last_name',
+    ]
+
     avatar = models.ImageField(
         verbose_name='Аватар',
         upload_to='profiles/avatars/',
