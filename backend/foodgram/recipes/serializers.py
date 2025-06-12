@@ -1,5 +1,6 @@
 from base64 import b64decode
 from io import StringIO
+import uuid
 from django.contrib.auth import get_user
 from django.core.files.base import ContentFile
 from rest_framework import serializers,status
@@ -13,7 +14,8 @@ class Base64ImageField(serializers.ImageField):
         if isinstance(data, str) and data.startswith('data:image'):
             fmt, img_str = data.split(';base64,')
             ext = fmt.split('/')[-1]
-            data = ContentFile(b64decode(img_str), name=f'temp.{ext}')
+            filename = f"avatar_{uuid.uuid4().hex[:8]}.{ext}"
+            data = ContentFile(b64decode(imgstr), name=filename)
         return super().to_internal_value(data)
 
 
