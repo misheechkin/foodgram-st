@@ -1,149 +1,152 @@
 from base64 import b64decode
-from io import StringIO
 import uuid
-from django.contrib.auth import get_user
 from django.core.files.base import ContentFile
-from rest_framework import serializers,status
-from django.http import FileResponse
-from rest_framework.response import Response
-from .models import Recipe, Ingredient, IngredientRecipe, ShoppingCart
+from django.core.paginator import Paginator
+from rest_framework import serializers
 
-
-class Base64ImageField(serializers.ImageField):
-    def to_internal_value(self, data):
-        if isinstance(data, str) and data.startswith('data:image'):
-            fmt, img_str = data.split(';base64,')
-            ext = fmt.split('/')[-1]
-            filename = f"avatar_{uuid.uuid4().hex[:8]}.{ext}"
-            data = ContentFile(b64decode(imgstr), name=filename)
-        return super().to_internal_value(data)
+from .models import Recipe, Ingredient, IngredientRecipe, Favorites, CartItem
+from users.serializers import UserProfileSerializer
 
 
 class IngredientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ingredient
-        fields = ('id', 'name', 'measurement_unit')
+        fields = '__all__'
 
 
-class IngredientRecipeSerializer(serializers.ModelSerializer):
-    id = serializers.PrimaryKeyRelatedField(
-        source='ingredient', queryset=Ingredient.objects.all()
+class IngredientRecipeInputSerializer(serializers.Serializer):
+    id = serializers.PrimaryKeyRelatedField(queryset=Ingredient.objects.all())
+    amount = serializers.IntegerField(
+        min_value=1,
+        error_messages={'min_value': 'Количество должно быть ≥ 1!'}
     )
-    name = serializers.CharField(source='ingredient.name', read_only=True)
-    measurement_unit = serializers.CharField(
-        source='ingredient.measurement_unit', read_only=True
-    )
-    amount = serializers.FloatField()
+
+
+class IngredientRecipeOutputSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='ingredient.id')
+    name = serializers.CharField(source='ingredient.name')
+    measurement_unit = serializers.CharField(source='ingredient.measurement_unit')
+    amount = serializers.IntegerField(min_value=1)
 
     class Meta:
         model = IngredientRecipe
         fields = ('id', 'name', 'measurement_unit', 'amount')
 
 
+class Base64ImageField(serializers.ImageField):
+    """Поле для представления картинки в формате base64."""
+    def to_internal_value(self, data):
+        if isinstance(data, str) and data.startswith('data:image'):
+            format, imgstr = data.split(';base64,')
+            ext = format.split('/')[-1]
+            filename = f"pic_{uuid.uuid4().hex[:8]}.{ext}"
+            data = ContentFile(b64decode(imgstr), name=filename)
+        return super().to_internal_value(data)
+
+
 class RecipeSerializer(serializers.ModelSerializer):
-    ingredients = IngredientRecipeSerializer(
-        source='ingredientrecipe_set', many=True
+    author = UserProfileSerializer(read_only=True)
+    image = Base64ImageField(required=True)
+    ingredients = serializers.ListField(
+        child=IngredientRecipeInputSerializer(),
+        write_only=True
     )
-    image = Base64ImageField(required=False, allow_null=True)
-    image_url = serializers.SerializerMethodField()
+    ingredients_info = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     is_in_shopping_cart = serializers.SerializerMethodField()
+    cooking_time = serializers.IntegerField(
+        min_value=1,
+        error_messages={'min_value': 'Время должно быть > 0!'}
+    )
 
     class Meta:
         model = Recipe
         fields = (
-            'id', 'name', 'text', 'cooking_time', 'image', 'image_url',
-            'author', 'ingredients', 'is_favorited', 'is_in_shopping_cart'
+            'id', 'author', 'name', 'text', 'image', 'cooking_time',
+            'ingredients', 'ingredients_info', 'is_favorited', 'is_in_shopping_cart'
         )
-        read_only_fields = ('author',)
+        read_only_fields = ('author', 'ingredients_info', 'is_favorited', 'is_in_shopping_cart')
 
-    def get_image_url(self, obj):
-        return obj.image.url if obj.image else None
+    def get_ingredients_info(self, recipe):
+        qs = recipe.recipe_ingredients.select_related('ingredient')
+        return IngredientRecipeOutputSerializer(qs, many=True).data
 
-    def get_is_favorited(self, obj):
-        return False
+    def get_is_favorited(self, recipe):
+        user = self.context.get('request').user
+        if not user or not user.is_authenticated:
+            return False
+        return Favorites.objects.filter(user=user, recipe=recipe).exists()
 
-    def get_is_in_shopping_cart(self, obj):
-        return False
+    def get_is_in_shopping_cart(self, recipe):
+        user = self.context.get('request').user
+        if not user or not user.is_authenticated:
+            return False
+        return CartItem.objects.filter(user=user, recipe=recipe).exists()
 
-    def _create_or_update_ingredients(self, recipe, ingredients_data):
-        IngredientRecipe.objects.filter(recipe=recipe).delete()
-        for item in ingredients_data:
-            ingredient = item['ingredient']
-            amount = item['amount']
-            IngredientRecipe.objects.create(
-                recipe=recipe,
-                ingredient=ingredient,
-                amount=amount
-            )
+    def validate_ingredients(self, items):
+        if not isinstance(items, list) or not items:
+            raise serializers.ValidationError('Нужно передать непустой список ингредиентов!')
+        ids = [it['id'].id if hasattr(it['id'], 'id') else it['id'] for it in items]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError('Ингредиенты не могут дублироваться!')
+        return items
 
     def create(self, validated_data):
-        ing_data = validated_data.pop('ingredientrecipe_set', [])
+        ingredients = validated_data.pop('ingredients')
         recipe = Recipe.objects.create(**validated_data)
-        for item in ing_data:
-            ing = item['ingredient']
-            IngredientRecipe.objects.create(
-                recipe=recipe,
-                ingredient=ing,
-                amount=item['amount']
-            )
+        self._save_ingredients(recipe, ingredients)
         return recipe
 
     def update(self, instance, validated_data):
-        ing_data = validated_data.pop('ingredientrecipe_set', None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        ingredients = validated_data.pop('ingredients', None)
+        for attr, val in validated_data.items():
+            setattr(instance, attr, val)
         instance.save()
-        if ing_data is not None:
-            self._create_or_update_ingredients(instance, ing_data)
+        if ingredients is not None:
+            instance.recipe_ingredients.all().delete()
+            self._save_ingredients(instance, ingredients)
         return instance
-    
 
-    @action(detail=True, methods=['post', 'delete'], url_path='shopping_cart')
-    def post_delete_shopping_cart(self, request, pk=None):
-        recipe = get_object_or_404(Recipe, pk=pk)
-        user = get_user(request=request)
+    def _save_ingredients(self, recipe, ingredients):
+        objs = []
+        existing = Ingredient.objects.in_bulk([item['id'] for item in ingredients])
+        if len(existing) != len(ingredients):
+            raise serializers.ValidationError('Один из ингредиентов не найден!')
+        for entry in ingredients:
+            ing = existing[entry['id']]
+            amount = entry['amount']
+            if amount < 1:
+                raise serializers.ValidationError('Количество ингредиента должно быть > 0!')
+            objs.append(IngredientRecipe(
+                recipe=recipe,
+                ingredient=ing,
+                amount=amount
+            ))
+        IngredientRecipe.objects.bulk_create(objs)
 
-        if request.method == 'POST':
-            note, created = ShoppingCart.objects.get_or_create(
-                user=user, recipe=recipe)
-            if not created:
-                return Response(detail='Рецепт уже в списке покупок!',
-                                status=status.HTTP_400_BAD_REQUEST)
-            return Response(status=status.HTTP_201_CREATED)
-        elif request.method == 'DELETE':
-            count, var = ShoppingCart.objects.filter(
-                user=user, recipe=recipe).delete()
-            if count == 0:
-                return Response(status=status.HTTP_400_BAD_REQUEST)
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        else:
-            return Response(status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'], url_path='download-shopping-cart')
-    def download_cart(self, request):
-        user = get_user(request=request)
+class ShortRecipeSerializer(serializers.ModelSerializer):
+    image = Base64ImageField(required=True)
 
-        ingredients = {}
+    class Meta:
+        model = Recipe
+        fields = ('id', 'name', 'image', 'cooking_time')
 
-        pk_in_cart = ShoppingCart.objects.filter(user=user)
-        for recipe_pk in pk_in_cart:
-            in_recipe = Recipe.objects.get(pk=recipe_pk).ingredients
-            for ingr in in_recipe:
-                product = Ingredient.objects.get(pk=ingr.pk)
-                if product in ingredients.keys:
-                    ingredients[product] += ingr.amount
-                else:
-                    ingredients[product] = ingr.amount
 
-        if len(ingredients) == 0:
-            return Response(detail='Список покупок пуст!',
-                            status=status.HTTP_200_OK)
+class SubscriptionSerializer(UserProfileSerializer):
+    recipes = serializers.SerializerMethodField()
+    recipes_count = serializers.SerializerMethodField()
 
-        file = StringIO()
-        for ingredient, amount in ingredients:
-            s = f'{ingredient.name} - {amount} {ingredient.measurement_unit}\n'
-            file.write(s)
+    class Meta(UserProfileSerializer.Meta):
+        fields = [*UserProfileSerializer.Meta.fields, 'recipes', 'recipes_count']
 
-        return FileResponse(file, as_attachment=True,
-                            filename='shoppingcart.txt')
+    def get_recipes(self, user):
+        qs = user.recipes.all()
+        limit = self.context['request'].query_params.get('recipes_limit')
+        if limit:
+            paginator = Paginator(qs, int(limit))
+            qs = paginator.page(1).object_list
+        return ShortRecipeSerializer(qs, many=True, context=self.context).data
+
+    def get_recipes_count(self, user):
+        return user.recipes.count()
