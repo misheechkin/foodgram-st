@@ -4,149 +4,177 @@ from django.core.files.base import ContentFile
 from django.core.paginator import Paginator
 from rest_framework import serializers
 
-from .models import Recipe, Ingredient, IngredientRecipe, Favorites, CartItem
-from users.serializers import UserProfileSerializer
+from .models import CookingRecipe, ProductComponent, RecipeComponent, FavoriteRecipe, ShoppingCart
+from users.serializers import UserSerializer
 
 
-class IngredientSerializer(serializers.ModelSerializer):
+class ProductSerializer(serializers.ModelSerializer):
+    
     class Meta:
-        model = Ingredient
+        model = ProductComponent
         fields = '__all__'
 
 
-class IngredientRecipeInputSerializer(serializers.Serializer):
-    id = serializers.PrimaryKeyRelatedField(queryset=Ingredient.objects.all())
-    amount = serializers.IntegerField(
+class ComponentInputSerializer(serializers.Serializer):
+    
+    id = serializers.PrimaryKeyRelatedField(queryset=ProductComponent.objects.all())
+    quantity = serializers.IntegerField(
         min_value=1,
-        error_messages={'min_value': 'Количество должно быть ≥ 1!'}
+        error_messages={'min_value': 'Количество должно быть не менее 1!'}
     )
 
 
-class IngredientRecipeOutputSerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(source='ingredient.id')
-    name = serializers.CharField(source='ingredient.name')
-    measurement_unit = serializers.CharField(source='ingredient.measurement_unit')
-    amount = serializers.IntegerField(min_value=1)
+class ComponentOutputSerializer(serializers.ModelSerializer):
+    
+    id = serializers.IntegerField(source='component.id')
+    title = serializers.CharField(source='component.title')
+    unit_type = serializers.CharField(source='component.unit_type')
+    quantity = serializers.IntegerField(min_value=1)
 
     class Meta:
-        model = IngredientRecipe
-        fields = ('id', 'name', 'measurement_unit', 'amount')
+        model = RecipeComponent
+        fields = ('id', 'title', 'unit_type', 'quantity')
 
 
 class Base64ImageField(serializers.ImageField):
-    """Поле для представления картинки в формате base64."""
+    
     def to_internal_value(self, data):
         if isinstance(data, str) and data.startswith('data:image'):
-            format, imgstr = data.split(';base64,')
-            ext = format.split('/')[-1]
-            filename = f"pic_{uuid.uuid4().hex[:8]}.{ext}"
-            data = ContentFile(b64decode(imgstr), name=filename)
+            format_part, image_data = data.split(';base64,')
+            extension = format_part.split('/')[-1]
+            file_name = f"recipe_{uuid.uuid4().hex[:8]}.{extension}"
+            data = ContentFile(b64decode(image_data), name=file_name)
         return super().to_internal_value(data)
 
 
-class RecipeSerializer(serializers.ModelSerializer):
-    author = UserProfileSerializer(read_only=True)
-    image = Base64ImageField(required=True)
-    ingredients = serializers.ListField(
-        child=IngredientRecipeInputSerializer(),
+class CookingRecipeSerializer(serializers.ModelSerializer):
+    
+    creator = UserSerializer(read_only=True)
+    picture = Base64ImageField(required=True)
+    components = serializers.ListField(
+        child=ComponentInputSerializer(),
         write_only=True
     )
-    ingredients_info = serializers.SerializerMethodField()
+    components_info = serializers.SerializerMethodField()
     is_favorited = serializers.SerializerMethodField()
     is_in_shopping_cart = serializers.SerializerMethodField()
-    cooking_time = serializers.IntegerField(
+    cook_duration = serializers.IntegerField(
         min_value=1,
-        error_messages={'min_value': 'Время должно быть > 0!'}
+        error_messages={'min_value': 'Время приготовления должно быть больше 0!'}
     )
 
     class Meta:
-        model = Recipe
+        model = CookingRecipe
         fields = (
-            'id', 'author', 'name', 'text', 'image', 'cooking_time',
-            'ingredients', 'ingredients_info', 'is_favorited', 'is_in_shopping_cart'
+            'id', 'creator', 'title', 'description', 'picture', 'cook_duration',
+            'components', 'components_info', 'is_favorited', 'is_in_shopping_cart'
         )
-        read_only_fields = ('author', 'ingredients_info', 'is_favorited', 'is_in_shopping_cart')
+        read_only_fields = ('creator', 'components_info', 'is_favorited', 'is_in_shopping_cart')
 
-    def get_ingredients_info(self, recipe):
-        qs = recipe.recipe_ingredients.select_related('ingredient')
-        return IngredientRecipeOutputSerializer(qs, many=True).data
+    def get_components_info(self, obj):
+        queryset = obj.recipe_components.select_related('component')
+        return ComponentOutputSerializer(queryset, many=True).data
 
-    def get_is_favorited(self, recipe):
+    def get_is_favorited(self, obj):
         user = self.context.get('request').user
         if not user or not user.is_authenticated:
             return False
-        return Favorites.objects.filter(user=user, recipe=recipe).exists()
+        return FavoriteRecipe.objects.filter(owner=user, recipe=obj).exists()
 
-    def get_is_in_shopping_cart(self, recipe):
+    def get_is_in_shopping_cart(self, obj):
         user = self.context.get('request').user
         if not user or not user.is_authenticated:
             return False
-        return CartItem.objects.filter(user=user, recipe=recipe).exists()
+        return ShoppingCart.objects.filter(customer=user, recipe=obj).exists()
 
-    def validate_ingredients(self, items):
-        if not isinstance(items, list) or not items:
-            raise serializers.ValidationError('Нужно передать непустой список ингредиентов!')
-        ids = [it['id'].id if hasattr(it['id'], 'id') else it['id'] for it in items]
-        if len(ids) != len(set(ids)):
-            raise serializers.ValidationError('Ингредиенты не могут дублироваться!')
-        return items
+    def validate_components(self, components_list):
+        if not isinstance(components_list, list) or not components_list:
+            raise serializers.ValidationError('Список ингредиентов не может быть пустым!')
+        
+        component_ids = [
+            item['id'].id if hasattr(item['id'], 'id') else item['id'] 
+            for item in components_list
+        ]
+        
+        if len(component_ids) != len(set(component_ids)):
+            raise serializers.ValidationError('Ингредиенты не должны повторяться!')
+        
+        return components_list
 
     def create(self, validated_data):
-        ingredients = validated_data.pop('ingredients')
-        recipe = Recipe.objects.create(**validated_data)
-        self._save_ingredients(recipe, ingredients)
+        components = validated_data.pop('components')
+        recipe = CookingRecipe.objects.create(**validated_data)
+        self._create_recipe_components(recipe, components)
         return recipe
 
     def update(self, instance, validated_data):
-        ingredients = validated_data.pop('ingredients', None)
-        for attr, val in validated_data.items():
-            setattr(instance, attr, val)
+        components = validated_data.pop('components', None)
+        
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
         instance.save()
-        if ingredients is not None:
-            instance.recipe_ingredients.all().delete()
-            self._save_ingredients(instance, ingredients)
+        
+        if components is not None:
+            instance.recipe_components.all().delete()
+            self._create_recipe_components(instance, components)
+        
         return instance
 
-    def _save_ingredients(self, recipe, ingredients):
-        objs = []
-        existing = Ingredient.objects.in_bulk([item['id'] for item in ingredients])
-        if len(existing) != len(ingredients):
-            raise serializers.ValidationError('Один из ингредиентов не найден!')
-        for entry in ingredients:
-            ing = existing[entry['id']]
-            amount = entry['amount']
-            if amount < 1:
-                raise serializers.ValidationError('Количество ингредиента должно быть > 0!')
-            objs.append(IngredientRecipe(
+    def _create_recipe_components(self, recipe, components):
+        component_objects = []
+        existing_components = ProductComponent.objects.in_bulk(
+            [item['id'] for item in components]
+        )
+        
+        if len(existing_components) != len(components):
+            raise serializers.ValidationError('Некоторые ингредиенты не найдены!')
+        
+        for component_data in components:
+            component = existing_components[component_data['id']]
+            quantity = component_data['quantity']
+            
+            if quantity < 1:
+                raise serializers.ValidationError('Количество ингредиента должно быть больше 0!')
+            
+            component_objects.append(RecipeComponent(
                 recipe=recipe,
-                ingredient=ing,
-                amount=amount
+                component=component,
+                quantity=quantity
             ))
-        IngredientRecipe.objects.bulk_create(objs)
+        
+        RecipeComponent.objects.bulk_create(component_objects)
 
 
-class ShortRecipeSerializer(serializers.ModelSerializer):
-    image = Base64ImageField(required=True)
+class CookingRecipeShortSerializer(serializers.ModelSerializer):
+    
+    picture = Base64ImageField(required=True)
 
     class Meta:
-        model = Recipe
-        fields = ('id', 'name', 'image', 'cooking_time')
+        model = CookingRecipe
+        fields = ('id', 'title', 'picture', 'cook_duration')
 
 
-class SubscriptionSerializer(UserProfileSerializer):
-    recipes = serializers.SerializerMethodField()
-    recipes_count = serializers.SerializerMethodField()
+class UserSubscriptionSerializer(UserSerializer):
+    
+    authored_recipes = serializers.SerializerMethodField()
+    authored_recipes_count = serializers.SerializerMethodField()
 
-    class Meta(UserProfileSerializer.Meta):
-        fields = [*UserProfileSerializer.Meta.fields, 'recipes', 'recipes_count']
+    class Meta(UserSerializer.Meta):
+        fields = [*UserSerializer.Meta.fields, 'authored_recipes', 'authored_recipes_count']
 
-    def get_recipes(self, user):
-        qs = user.recipes.all()
-        limit = self.context['request'].query_params.get('recipes_limit')
-        if limit:
-            paginator = Paginator(qs, int(limit))
-            qs = paginator.page(1).object_list
-        return ShortRecipeSerializer(qs, many=True, context=self.context).data
+    def get_authored_recipes(self, user):
+        recipes_queryset = user.authored_recipes.all()
+        recipes_limit = self.context['request'].query_params.get('recipes_limit')
+        
+        if recipes_limit:
+            paginator = Paginator(recipes_queryset, int(recipes_limit))
+            recipes_queryset = paginator.page(1).object_list
+        
+        return CookingRecipeShortSerializer(
+            recipes_queryset, 
+            many=True, 
+            context=self.context
+        ).data
 
-    def get_recipes_count(self, user):
-        return user.recipes.count()
+    def get_authored_recipes_count(self, user):
+        return user.authored_recipes.count()

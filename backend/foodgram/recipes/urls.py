@@ -1,18 +1,22 @@
 from django.urls import include, path
-from rest_framework import routers
+from rest_framework.routers import DefaultRouter
 
-from .views import (IngredientViewSet,
-                    RecipeViewSet,
-                    SubscriptionViewSet,
-                    SingleSubscriptionViewSet)
+from .views import (
+    ProductComponentViewSet,
+    CookingRecipeViewSet,
+    UserSubscriptionsViewSet,
+    SubscriptionManagementViewSet
+)
 
-router = routers.DefaultRouter()
-router.register(r'recipes', RecipeViewSet, basename='recipes')
-router.register(r'ingredients', IngredientViewSet)
-router.register(r'users/subscriptions',
-                SubscriptionViewSet,
-                basename='subscriptions')
-router.register(r'users', SingleSubscriptionViewSet, basename='users')
+router = DefaultRouter()
+router.register(r'recipes', CookingRecipeViewSet, basename='cooking-recipes')
+router.register(r'ingredients', ProductComponentViewSet)
+router.register(
+    r'users/subscriptions',
+    UserSubscriptionsViewSet,
+    basename='user-subscriptions'
+)
+router.register(r'users', SubscriptionManagementViewSet, basename='subscription-management')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -4,77 +4,62 @@ from django.contrib.auth.models import AbstractUser
 from rest_framework.validators import ValidationError
 
 
-def validate_username(value):
-    if not match(r'^[\w.@+-]+\Z', value):
-        raise ValidationError(
-            'Недопустимые символы: ^[\\w.@+-]+\\z'
-        )
+def check_username_format(username_value):
+    if not match(r'^[\w.@+-]+\Z', username_value):
+        raise ValidationError('Недопустимые символы в имени пользователя!')
 
 
-class UserProfile(AbstractUser):
-
-    email = models.EmailField(
-        unique=True,
-        max_length=254
-    )
-
+class User(AbstractUser):
+    
+    email = models.EmailField('Электронная почта', unique=True, max_length=254)
     username = models.CharField(
+        'Имя пользователя',
         max_length=150,
         unique=True,
-        validators=[validate_username]
+        validators=[check_username_format]
     )
-
-    first_name = models.CharField(
-        max_length=150,
-        blank=False,
-        null=False
-    )
-
-    last_name = models.CharField(
-        max_length=150,
-        blank=False,
-        null=False
-    )
-
+    first_name = models.CharField('Имя', max_length=150)
+    last_name = models.CharField('Фамилия', max_length=150)
     avatar = models.ImageField(
-        'Аватар',
-        upload_to='users/images',
+        'Аватар пользователя',
+        upload_to='users/avatars',
         null=True,
-        default=None
+        blank=True
     )
+    
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = [
-        'username',
-        'first_name',
-        'last_name',
-        'password'
-    ]
+    REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
 
     class Meta(AbstractUser.Meta):
         db_table = 'auth_user'
-        verbose_name = 'профиль пользователя'
-        verbose_name_plural = 'Профили пользователей'
+        verbose_name = 'Пользователь'
+        verbose_name_plural = 'Пользователи'
 
 
-class Subscription(models.Model):
-
-    user = models.ForeignKey(
-        UserProfile,
-        verbose_name='Пользователь',
-        related_name='subscriber',
+class UserSubscription(models.Model):
+    
+    subscriber = models.ForeignKey(
+        User,
+        verbose_name='Подписчик',
+        related_name='following',
         on_delete=models.CASCADE
     )
-    follows = models.ForeignKey(
-        UserProfile,
-        verbose_name='Подписка',
-        related_name='subbed_to',
+    target_user = models.ForeignKey(
+        User,
+        verbose_name='На кого подписан',
+        related_name='followers',
         on_delete=models.CASCADE
     )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['user', 'follows'],
-                                    name="unique_subs")
+            models.UniqueConstraint(
+                fields=['subscriber', 'target_user'],
+                name='unique_user_subscription'
+            )
         ]
-        verbose_name = 'подписка'
+        verbose_name = 'Подписка'
         verbose_name_plural = 'Подписки'
+
+    def __str__(self):
+        return f'{self.subscriber} подписан на {self.target_user}'
