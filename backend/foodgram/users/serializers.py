@@ -1,59 +1,41 @@
-from django.contrib.auth import get_user_model
+from base64 import b64decode
+import uuid
+from django.core.files.base import ContentFile
 from rest_framework import serializers
-from recipes.serializers import Base64ImageField
+from djoser.serializers import UserSerializer, UserCreateSerializer
 
-from .models import Profile, Follow
-
-User = get_user_model()
+from .models import UserProfile, Subscription
 
 
-class FollowSerializer(serializers.ModelSerializer):
+class Base64ImageField(serializers.ImageField):
+    def to_internal_value(self, data):
+        if isinstance(data, str) and data.startswith('data:image'):
+            format, imgstr = data.split(';base64,')
+            ext = format.split('/')[-1]
+            filename = f"avatar_{uuid.uuid4().hex[:8]}.{ext}"
+            data = ContentFile(b64decode(imgstr), name=filename)
+        return super().to_internal_value(data)
 
-    class Meta:
-        model = Follow
-        fields = ('author', 'subscriber')
-        read_only_fields = ('author', 'subscriber')
 
-
-class ProfileSerializer(serializers.ModelSerializer):
-
+class UserProfileSerializer(UserSerializer):
+    is_subscribed = serializers.SerializerMethodField(read_only=True)
     avatar = Base64ImageField(required=False, allow_null=True)
-    avatar_url = serializers.SerializerMethodField()
-    is_following = serializers.SerializerMethodField()
 
-    class Meta:
-        model = Profile
-        fields = (
-            'id', 'username', 'first_name', 'last_name', 'email',
-            'avatar', 'avatar_url', 'is_following',
-        )
-        read_only_fields = ('is_following',)
+    class Meta(UserSerializer.Meta):
+        model = UserProfile
+        fields = [
+            'id', 'email', 'username', 'first_name',
+            'last_name', 'is_subscribed', 'avatar'
+        ]
 
-    def get_avatar_url(self, obj):
-        if obj.avatar and hasattr(obj.avatar, 'url'):
-            return obj.avatar.url
-        return None
-
-    def get_is_following(self, obj):
+    def get_is_subscribed(self, obj):
         request = self.context.get('request')
-        if not request or not request.user.is_authenticated:
+        if not request or not request.user.is_authenticated or obj == request.user:
             return False
-        return Follow.objects.filter(
-            author=obj,
-            subscriber=request.user
-        ).exists()
+        return Subscription.objects.filter(user=request.user, follows=obj).exists()
 
-    def update(self, instance, validated_data):
-        avatar = validated_data.get('avatar')
-        if avatar is not None:
-            instance.avatar = avatar
-            instance.save()
-        return instance
 
-    def delete_avatar(self):
-        instance = self.instance
-        if instance.avatar:
-            instance.avatar.delete(save=True)
-        return instance
-
-    
+class UserProfileCreateSerializer(UserCreateSerializer):
+    class Meta(UserCreateSerializer.Meta):
+        model = UserProfile
+        fields = ('id', 'email', 'username', 'password', 'first_name', 'last_name')

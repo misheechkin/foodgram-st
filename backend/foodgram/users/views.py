@@ -1,60 +1,46 @@
-from rest_framework import viewsets, mixins, permissions, pagination
-from .models import Profile, Follow
-from .serializers import FollowSerializer, ProfileSerializer
+from django.shortcuts import get_object_or_404
+from rest_framework import status, permissions, pagination
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import viewsets, pagination, mixins, permissions, status
+from rest_framework.validators import ValidationError
+from djoser.views import UserViewSet
 
-class FollowViewSet(viewsets.GenericViewSet,
-                    mixins.CreateModelMixin,
-                    mixins.DestroyModelMixin):
-    queryset = Follow.objects.all()
-    serializer_class = ProfileSerializer
-    permission_classes = (permissions.IsAuthenticated, )
-
-    def get_queryset(self):
-        return Follow.objects.filter(subscriber=self.request.user)
+from .models import UserProfile, Subscription
+from .serializers import UserProfileSerializer
 
 
-class ProfileViewSet(viewsets.ModelViewSet):
-    queryset = Profile.objects.all()
-    serializer_class = FollowSerializer
+class UserProfileViewSet(UserViewSet):
+    queryset = UserProfile.objects.all()
+    serializer_class = UserProfileSerializer
     pagination_class = pagination.LimitOffsetPagination
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly, )
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
+    @action(detail=False, methods=['get'], url_path='me', permission_classes=[permissions.IsAuthenticated])
+    def get_current_user(self, request):
+        data = self.get_serializer(request.user).data
+        return Response(data)
 
-    def perform_create(self, serializer):
-        serializer.save()
+    @action(detail=True, methods=['get'], url_path='', permission_classes=[permissions.IsAuthenticatedOrReadOnly])
+    def get_user(self, request, pk=None):
+        user = self.get_object()
+        data = self.get_serializer(user).data
+        return Response(data, status=status.HTTP_200_OK)
 
-    def get_queryset(self):
-        return Profile.objects.all()
-    
-    @action(detail=False, methods=['get'], url_path='me')
-    def retrieve_current_user(self, request):
-        serializer = self.get_serializer(instance=request.user)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['put', 'delete'], url_path='me/avatar')
-    def manage_avatar(self, request):
+    @action(detail=False, methods=['put', 'delete'], url_path='me/avatar', permission_classes=[permissions.IsAuthenticated])
+    def put_delete_avatar(self, request):
         user = request.user
-
         if request.method == 'PUT':
-            serializer = self.get_serializer(instance=user, data=request.data, partial=True)
+            serializer = self.get_serializer(user, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
-
-            existing_avatar = getattr(user, 'avatar', None)
-            if existing_avatar:
-                existing_avatar.delete()
-
+            avatar = request.data.get('avatar')
+            if not avatar:
+                return Response({'avatar': 'Поле avatar не задано!'}, status=status.HTTP_400_BAD_REQUEST)
+            if user.avatar:
+                user.avatar.delete()
             serializer.save()
-            avatar_url = serializer.data.get('avatar')
-            return Response({'avatar': avatar_url}, status=status.HTTP_200_OK)
-
-        if user.avatar:
-            user.avatar.delete()
-            user.save()
-
-        return Response({'message': 'Аватар удалён успешно'}, status=status.HTTP_204_NO_CONTENT)
+            return Response({'avatar': serializer.data['avatar']}, status=status.HTTP_200_OK)
+        if not user.avatar:
+            return Response({'detail': 'Аватар отсутствует'}, status=status.HTTP_400_BAD_REQUEST)
+        user.avatar.delete()
+        user.save()
+        return Response({'message': 'Аватар удалён'}, status=status.HTTP_204_NO_CONTENT)
