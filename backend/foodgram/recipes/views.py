@@ -1,6 +1,5 @@
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404
 from django.http import HttpResponseRedirect
-from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from .models import CookingRecipe
 
@@ -32,7 +31,6 @@ def generate_short_link(recipe_id):
     """
     try:
         # Конвертируем ID в base36 для получения короткой строки
-        import math
         
         if recipe_id <= 0:
             return None

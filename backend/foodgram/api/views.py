@@ -4,7 +4,7 @@ from django.db.models import Sum
 from django.http import FileResponse
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from rest_framework import filters, viewsets, permissions, mixins, status
+from rest_framework import filters, viewsets, permissions, status
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
