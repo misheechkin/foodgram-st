@@ -13,7 +13,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--file',
             type=str,
-            default='data/ingredients.json',
+            default='/app/data/ingredients.json',
             help=_('Путь к JSON файлу с продуктами (относительно корня проекта)')
         )
         parser.add_argument(
