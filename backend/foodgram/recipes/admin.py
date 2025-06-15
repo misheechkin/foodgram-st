@@ -11,6 +11,57 @@ from .models import (
 )
 
 
+class HasRecipesFilter(admin.SimpleListFilter):
+    title = _('наличие рецептов')
+    parameter_name = 'has_recipes'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', _('Есть рецепты')),
+            ('no', _('Нет рецептов')),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(authored_recipes__isnull=False).distinct()
+        if self.value() == 'no':
+            return queryset.filter(authored_recipes__isnull=True).distinct()
+
+
+class HasSubscriptionsFilter(admin.SimpleListFilter):
+    title = _('наличие подписок')
+    parameter_name = 'has_subscriptions'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', _('Есть подписки')),
+            ('no', _('Нет подписок')),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(following__isnull=False).distinct()
+        if self.value() == 'no':
+            return queryset.filter(following__isnull=True).distinct()
+
+
+class HasSubscribersFilter(admin.SimpleListFilter):
+    title = _('наличие подписчиков')
+    parameter_name = 'has_subscribers'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', _('Есть подписчики')),
+            ('no', _('Нет подписчиков')),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(followers__isnull=False).distinct()
+        if self.value() == 'no':
+            return queryset.filter(followers__isnull=True).distinct()
+
+
 @admin.register(User)
 class FoodgramUserAdmin(UserAdmin):
     
@@ -21,8 +72,8 @@ class FoodgramUserAdmin(UserAdmin):
     )
     search_fields = ('email', 'username', 'first_name', 'last_name')
     list_filter = (
-        'is_staff', 'is_active', 'date_joined',
-        'has_recipes', 'has_subscriptions', 'has_subscribers'
+        'is_staff', 'is_active', 'date_joined', 
+        HasRecipesFilter, HasSubscriptionsFilter, HasSubscribersFilter
     )
     ordering = ('username',)
     readonly_fields = (
