@@ -1,23 +1,7 @@
-from django.urls import include, path
-from rest_framework.routers import DefaultRouter
+from django.urls import path
+from . import views
 
-from .views import (
-    ProductComponentViewSet,
-    CookingRecipeViewSet,
-    UserSubscriptionsViewSet,
-    SubscriptionManagementViewSet
-)
-
-router = DefaultRouter()
-router.register(r'recipes', CookingRecipeViewSet, basename='cooking-recipes')
-router.register(r'ingredients', ProductComponentViewSet)
-router.register(
-    r'users/subscriptions',
-    UserSubscriptionsViewSet,
-    basename='user-subscriptions'
-)
-router.register(r'users', SubscriptionManagementViewSet, basename='subscription-management')
-
+# URLs для коротких ссылок на рецепты
 urlpatterns = [
-    path('', include(router.urls)),
+    path('<str:short_id>/', views.redirect_to_recipe, name='short-link'),
 ]
