@@ -35,7 +35,6 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductComponent
         fields = ('id', 'title', 'unit_type')
-        read_only_fields = fields
 
 
 class ComponentInputSerializer(serializers.ModelSerializer):
@@ -117,25 +116,25 @@ class CookingRecipeSerializer(serializers.ModelSerializer):
         return recipe
 
     def update(self, instance, validated_data):
+        components = validated_data.pop('components')
+        instance.recipe_components.all().delete()
+        self._create_recipe_components(instance, components)
         return super().update(instance, validated_data)
         
 
     def _create_recipe_components(self, recipe, components):
-        component_objects = [
+        RecipeComponent.objects.bulk_create([
             RecipeComponent(
                 recipe=recipe,
                 component=component_data['id'],
                 quantity=component_data['quantity']
             )
             for component_data in components
-        ]
-        
-        RecipeComponent.objects.bulk_create(component_objects)
+        ])
 
 
 class CookingRecipeShortSerializer(serializers.ModelSerializer):
     
-    picture = Base64ImageField(required=True)
 
     class Meta:
         model = CookingRecipe
@@ -145,17 +144,17 @@ class CookingRecipeShortSerializer(serializers.ModelSerializer):
 
 class UserSubscriptionSerializer(UserSerializer):
     
-    authored_recipes = serializers.SerializerMethodField()
-    authored_recipes_count = serializers.IntegerField(
-        source='authored_recipes.count', read_only=True
+    recipes = serializers.SerializerMethodField()
+    recipes_count = serializers.IntegerField(
+        source='recipes.count', read_only=True
     )
 
     class Meta(UserSerializer.Meta):
-        fields = [*UserSerializer.Meta.fields, 'authored_recipes', 'authored_recipes_count']
+        fields = [*UserSerializer.Meta.fields, 'recipes', 'recipes_count']
         read_only_fields = fields
 
-    def get_authored_recipes(self, user):
-        recipes_queryset = user.authored_recipes.all()
+    def get_recipes(self, user):
+        recipes_queryset = user.recipes.all()
         recipes_limit = self.context['request'].query_params.get('recipes_limit')
         
         if recipes_limit:

@@ -32,7 +32,7 @@ class HasRecipesFilter(BaseHasRelatedFilter):
         ('yes', _('Есть рецепты')),
         ('no', _('Нет рецептов')),
     )
-    related_field = 'authored_recipes'
+    related_field = 'recipes'
 
 
 class HasSubscriptionsFilter(BaseHasRelatedFilter):
@@ -76,18 +76,18 @@ class FoodgramUserAdmin(UserAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related(
-            'authored_recipes', 'following', 'followers'
+            'recipes', 'following', 'followers'
         )
     
     @admin.display(description=_('ФИО'), ordering='first_name')
     def get_full_name(self, user):
         """ФИО пользователя"""
-        return f"{user.first_name} {user.last_name}".strip() or user.username
+        return f"{user.first_name} {user.last_name}".strip()
     
-    @admin.display(description=_('рецептов'), ordering='authored_recipes')
+    @admin.display(description=_('рецептов'), ordering='recipes')
     def recipes_count(self, user):
         """Количество рецептов пользователя"""
-        return user.authored_recipes.count()
+        return user.recipes.count()
     
     @admin.display(description=_('Подписчиков'), ordering='followers')
     def subscribers_count(self, user):
@@ -177,15 +177,10 @@ class CookingRecipeAdmin(admin.ModelAdmin):
     @admin.display(description=_('Продукты'))
     def get_ingredients(self, obj):
         """Отображение продуктов в админке"""
-        ingredients = obj.recipe_components.select_related('component')
-
-        
-        ingredients_list = [
+        return mark_safe("<br>".join(
             f"{ingredient.component.title} - {ingredient.quantity} {ingredient.component.unit_type}"
-            for ingredient in ingredients
-        ]
-        
-        return mark_safe("<br>".join(ingredients_list))
+            for ingredient in obj.recipe_components.select_related('component')
+        ))
     
     @admin.display(description=_('Изображение'))
     def get_image(self, obj):

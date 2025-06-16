@@ -1,6 +1,8 @@
 from datetime import datetime
 from django.db.models import Sum
+from django.forms import ValidationError
 from django.http import FileResponse
+from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, viewsets, permissions, status
@@ -60,26 +62,25 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         serializer.save(creator=self.request.user)
 
     def _handle_recipe_relation(self, request, pk, model_class):
+        
         recipe = get_object_or_404(CookingRecipe, pk=pk)
         user = request.user
         verbose = model_class._meta.verbose_name
         if request.method == 'POST':
             _, created = model_class.objects.get_or_create(user=user, recipe=recipe)
             if not created:
-                return Response(
-                    {'detail': f'{verbose.capitalize()} для рецепта "{recipe.title}" уже существует.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                raise ValidationError({
+                    'detail': f'{verbose.capitalize()} для рецепта "{recipe.title}" уже существует.'
+                })
             serializer = CookingRecipeShortSerializer(recipe)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        relation = get_object_or_404(model_class, user=user, recipe=recipe)
-        relation.delete()
+        get_object_or_404(model_class, user=user, recipe=recipe).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=True, 
         methods=['post', 'delete'], 
-        url_path='shopping_cart',  # Changed from shopping-cart to shopping_cart
+        url_path='shopping_cart',  
         permission_classes=[permissions.IsAuthenticated]
     )
     def handle_shopping_cart(self, request, pk=None):
@@ -95,14 +96,14 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         user = request.user
         shopping_list = (
             RecipeComponent.objects
-            .filter(recipe__shopping_items__user=user)  # Исправлено здесь
+            .filter(recipe__shopping_items__user=user) 
             .values('component__title', 'component__unit_type')
             .annotate(total_quantity=Sum('quantity'))
             .order_by('component__title')
         )
         recipes_in_cart = (
             CookingRecipe.objects
-            .filter(shopping_items__user=user)  # Исправлено здесь
+            .filter(shopping_items__user=user)  
             .select_related('creator')
             .values('title', 'creator__username', 'creator__first_name', 'creator__last_name')
         )
@@ -150,8 +151,8 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
 
         recipe_exists = CookingRecipe.objects.filter(pk=pk).exists()
         if not recipe_exists:
-            return Response({'error': 'Рецепт не найден'}, status=status.HTTP_404_NOT_FOUND)
-        from django.urls import reverse
+            return Response({'error': f'Рецепт с id={pk} не найден'}, status=status.HTTP_404_NOT_FOUND)
+
         short_link = request.build_absolute_uri(reverse('recipes:short-link', kwargs={'pk': pk}))
         return Response({'short-link': short_link})
 
@@ -229,8 +230,8 @@ class UserViewSet(DjoserUserViewSet):
     def subscriptions(self, request):
         """Получить список подписок пользователя"""
         subscribed_users = User.objects.filter(
-            authors__subscriber=request.user  # Исправлено с followers на authors
-        ).prefetch_related('authored_recipes')
+            authors__subscriber=request.user 
+        ).prefetch_related('recipes')
         
         page = self.paginate_queryset(subscribed_users)
         serializer = UserSubscriptionSerializer(page, many=True, context={'request': request})

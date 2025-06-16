@@ -40,7 +40,7 @@ class UserSubscription(models.Model):
     subscriber = models.ForeignKey(
         User,
         verbose_name=_('Подписчик'),
-        related_name='subscribed_users',
+        related_name='subscriptions',
         on_delete=models.CASCADE
     )
     target_user = models.ForeignKey(
@@ -92,13 +92,13 @@ class CookingRecipe(models.Model):
     creator = models.ForeignKey(
         User,
         verbose_name=_('Автор рецепта'),
-        related_name='authored_recipes',
+        related_name='recipes',
         on_delete=models.CASCADE
     )
     components = models.ManyToManyField(
         ProductComponent,
         through='RecipeComponent',
-        related_name='used_in_recipes',
+        related_name='recipes',
         verbose_name=_('Список продуктов'),
         through_fields=('recipe', 'component')
     )
