@@ -1,16 +1,13 @@
-from django.core.paginator import Paginator
 from rest_framework import serializers
 from drf_extra_fields.fields import Base64ImageField
-from djoser.serializers import UserSerializer as DjoserUserSerializer, UserCreateSerializer as DjoserUserCreateSerializer
+from djoser.serializers import UserSerializer as DjoserUserSerializer
 
 from recipes.models import CookingRecipe, ProductComponent, RecipeComponent, FavoriteRecipe, ShoppingCart
 from recipes.models import User, UserSubscription
 
 
 class UserSerializer(DjoserUserSerializer):
-    """
-    Сериализатор пользователя, наследуется от Djoser для лучшей интеграции
-    """
+
     is_subscribed = serializers.SerializerMethodField(read_only=True)
     avatar = Base64ImageField(required=False, allow_null=True)
 
@@ -19,7 +16,7 @@ class UserSerializer(DjoserUserSerializer):
         fields = DjoserUserSerializer.Meta.fields + (
             'is_subscribed', 'avatar'
         )
-        read_only_fields = DjoserUserSerializer.Meta.read_only_fields
+        read_only_fields = fields
 
     def get_is_subscribed(self, user):
         request = self.context.get('request')
@@ -33,27 +30,17 @@ class UserSerializer(DjoserUserSerializer):
         )
 
 
-class UserCreateSerializer(DjoserUserCreateSerializer):
-    """
-    Сериализатор для создания пользователя с использованием Djoser
-    """
-    class Meta(DjoserUserCreateSerializer.Meta):
-        model = User
-        fields = DjoserUserCreateSerializer.Meta.fields
-
-
 class ProductSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ProductComponent
-        fields = '__all__'
-        read_only_fields = '__all__'
+        fields = ('id', 'title', 'unit_type')
+        read_only_fields = fields
 
 
 class ComponentInputSerializer(serializers.ModelSerializer):
-    
     id = serializers.PrimaryKeyRelatedField(queryset=ProductComponent.objects.all())
-    
+    quantity = serializers.IntegerField(min_value=1)
     class Meta:
         model = RecipeComponent
         fields = ('id', 'quantity')
@@ -68,7 +55,7 @@ class ComponentOutputSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecipeComponent
         fields = ('id', 'title', 'unit_type', 'quantity')
-        read_only_fields = '__all__'
+        read_only_fields = fields
 
 
 class CookingRecipeSerializer(serializers.ModelSerializer):
@@ -78,10 +65,7 @@ class CookingRecipeSerializer(serializers.ModelSerializer):
     components = ComponentInputSerializer(many=True, write_only=True)
     is_favorited = serializers.SerializerMethodField()
     is_in_shopping_cart = serializers.SerializerMethodField()
-    cook_duration = serializers.IntegerField(
-        min_value=1,
-        error_messages={'min_value': 'Время приготовления должно быть больше 0!'}
-    )
+    cook_duration = serializers.IntegerField(min_value=1)
 
     class Meta:
         model = CookingRecipe
@@ -133,14 +117,8 @@ class CookingRecipeSerializer(serializers.ModelSerializer):
         return recipe
 
     def update(self, instance, validated_data):
-        components = validated_data.pop('components', None)
-        instance = super().update(instance, validated_data)
+        return super().update(instance, validated_data)
         
-        if components is not None:
-            instance.recipe_components.all().delete()
-            self._create_recipe_components(instance, components)
-        
-        return instance
 
     def _create_recipe_components(self, recipe, components):
         component_objects = [
@@ -162,7 +140,7 @@ class CookingRecipeShortSerializer(serializers.ModelSerializer):
     class Meta:
         model = CookingRecipe
         fields = ('id', 'title', 'picture', 'cook_duration')
-        read_only_fields = '__all__'
+        read_only_fields = fields
 
 
 class UserSubscriptionSerializer(UserSerializer):
@@ -174,14 +152,14 @@ class UserSubscriptionSerializer(UserSerializer):
 
     class Meta(UserSerializer.Meta):
         fields = [*UserSerializer.Meta.fields, 'authored_recipes', 'authored_recipes_count']
+        read_only_fields = fields
 
     def get_authored_recipes(self, user):
         recipes_queryset = user.authored_recipes.all()
         recipes_limit = self.context['request'].query_params.get('recipes_limit')
         
         if recipes_limit:
-            paginator = Paginator(recipes_queryset, int(recipes_limit))
-            recipes_queryset = paginator.page(1).object_list
+            recipes_queryset = recipes_queryset[:int(recipes_limit)]
         
         return CookingRecipeShortSerializer(
             recipes_queryset, 

@@ -1,10 +1,10 @@
-from io import BytesIO
 from datetime import datetime
 from django.db.models import Sum
 from django.http import FileResponse
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, viewsets, permissions, status
+from rest_framework.permissions import AllowAny
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -28,7 +28,7 @@ class ProductComponentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ProductComponent.objects.all()
     serializer_class = ProductSerializer
     pagination_class = None
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    permission_classes = [AllowAny]
     filter_backends = (DjangoFilterBackend, filters.SearchFilter)
     filterset_fields = ('title',)
     search_fields = ('^title',)
@@ -53,27 +53,25 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         return (
             CookingRecipe.objects
             .select_related('creator')
-            .prefetch_related('recipe_components__component', 'favorites', 'in_shopping_carts')
+            .prefetch_related('recipe_components__component', 'favorite_recipes', 'shopping_items')
         )
 
     def perform_create(self, serializer):
         serializer.save(creator=self.request.user)
 
-    def _handle_recipe_relation(self, request, pk, model_class, error_messages):
-        """Общий метод для управления избранным и корзиной"""
+    def _handle_recipe_relation(self, request, pk, model_class):
         recipe = get_object_or_404(CookingRecipe, pk=pk)
         user = request.user
-        
+        verbose = model_class._meta.verbose_name
         if request.method == 'POST':
             _, created = model_class.objects.get_or_create(user=user, recipe=recipe)
             if not created:
                 return Response(
-                    {'detail': error_messages['already_exists'].format(recipe=recipe.title)}, 
+                    {'detail': f'{verbose.capitalize()} для рецепта "{recipe.title}" уже существует.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             serializer = CookingRecipeShortSerializer(recipe)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
         relation = get_object_or_404(model_class, user=user, recipe=recipe)
         relation.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -81,14 +79,11 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
     @action(
         detail=True, 
         methods=['post', 'delete'], 
-        url_path='shopping-cart',
+        url_path='shopping_cart',  # Changed from shopping-cart to shopping_cart
         permission_classes=[permissions.IsAuthenticated]
     )
     def handle_shopping_cart(self, request, pk=None):
-        return self._handle_recipe_relation(
-            request, pk, ShoppingCart,
-            {'already_exists': 'Рецепт "{recipe}" уже в корзине'}
-        )
+        return self._handle_recipe_relation(request, pk, ShoppingCart)
 
     @action(
         detail=False, 
@@ -100,19 +95,17 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         user = request.user
         shopping_list = (
             RecipeComponent.objects
-            .filter(recipe__in_shopping_carts__user=user)
+            .filter(recipe__shopping_items__user=user)  # Исправлено здесь
             .values('component__title', 'component__unit_type')
             .annotate(total_quantity=Sum('quantity'))
             .order_by('component__title')
         )
-        
         recipes_in_cart = (
             CookingRecipe.objects
-            .filter(in_shopping_carts__user=user)
+            .filter(shopping_items__user=user)  # Исправлено здесь
             .select_related('creator')
             .values('title', 'creator__username', 'creator__first_name', 'creator__last_name')
         )
-        
         content = '\n'.join([
             f'Список покупок на {datetime.now().strftime("%d.%m.%Y")}',
             '',
@@ -131,15 +124,10 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
                 for recipe in recipes_in_cart
             ],
         ])
-        
-        file_buffer = BytesIO()
-        file_buffer.write(content.encode('utf-8'))
-        file_buffer.seek(0)
-        
         return FileResponse(
-            file_buffer, 
-            as_attachment=True, 
-            filename='shopping_list.txt', 
+            content,
+            as_attachment=True,
+            filename='shopping_list.txt',
             content_type='text/plain'
         )
 
@@ -150,10 +138,7 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated]
     )
     def handle_favorites(self, request, pk=None):
-        return self._handle_recipe_relation(
-            request, pk, FavoriteRecipe,
-            {'already_exists': 'Рецепт "{recipe}" уже в избранном'}
-        )
+        return self._handle_recipe_relation(request, pk, FavoriteRecipe)
 
     @action(
         detail=True, 
@@ -162,22 +147,12 @@ class CookingRecipeViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticatedOrReadOnly]
     )
     def get_link(self, request, pk=None):
-        """Получить короткую ссылку на рецепт"""
-        recipe = self.get_object()
-        
-        # Импортируем функцию генерации короткой ссылки
-        from recipes.views import generate_short_link
-        
-        short_id = generate_short_link(recipe.id)
-        if not short_id:
-            return Response(
-                {'error': 'Не удалось создать короткую ссылку'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        # Формируем полную ссылку
-        short_link = request.build_absolute_uri(f'/recipes/{short_id}/')
-        
+
+        recipe_exists = CookingRecipe.objects.filter(pk=pk).exists()
+        if not recipe_exists:
+            return Response({'error': 'Рецепт не найден'}, status=status.HTTP_404_NOT_FOUND)
+        from django.urls import reverse
+        short_link = request.build_absolute_uri(reverse('recipes:short-link', kwargs={'pk': pk}))
         return Response({'short-link': short_link})
 
 
@@ -254,17 +229,13 @@ class UserViewSet(DjoserUserViewSet):
     def subscriptions(self, request):
         """Получить список подписок пользователя"""
         subscribed_users = User.objects.filter(
-            followers__subscriber=request.user
+            authors__subscriber=request.user  # Исправлено с followers на authors
         ).prefetch_related('authored_recipes')
         
         page = self.paginate_queryset(subscribed_users)
-        if page is not None:
-            serializer = UserSubscriptionSerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
+        serializer = UserSubscriptionSerializer(page, many=True, context={'request': request})
+        return self.get_paginated_response(serializer.data)
         
-        serializer = UserSubscriptionSerializer(subscribed_users, many=True, context={'request': request})
-        return Response(serializer.data)
-
     @action(
         detail=True, 
         methods=['post', 'delete'], 

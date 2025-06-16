@@ -8,8 +8,8 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r'recipes', CookingRecipeViewSet, basename='cooking-recipes')
-router.register(r'ingredients', ProductComponentViewSet)
+router.register(r'recipes', CookingRecipeViewSet, basename='recipes')
+router.register(r'ingredients', ProductComponentViewSet,  basename='ingredients')
 router.register(r'users', UserViewSet, basename='users')
 
 urlpatterns = [
